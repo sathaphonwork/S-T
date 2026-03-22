@@ -416,7 +416,11 @@ async function doAuth(){
   if(!email||!pass){showAuthErr('กรุณากรอก email และรหัสผ่าน');return;}
   const btn=document.getElementById('auth-btn');btn.disabled=true;btn.textContent='กำลังดำเนินการ...';
   try{
-    if(authMode==='login'){const{error}=await sb.auth.signInWithPassword({email,password:pass});if(error)throw error;}
+    if(authMode==='login'){const{error}=await sb.auth.signInWithPassword({email,password:pass});if(error)throw error;
+      currentUser=data.user;
+      btn.textContent='กำลังโหลด...';
+      await startApp();
+    }
     else{const{error}=await sb.auth.signUp({email,password:pass});if(error)throw error;showAuthOk('สมัครสำเร็จ! ตรวจสอบ email แล้วล็อกอินได้เลย');switchTab('login');btn.disabled=false;btn.textContent='เข้าสู่ระบบ';return;}
   }catch(e){showAuthErr(e.message||'เกิดข้อผิดพลาด');btn.disabled=false;btn.textContent=authMode==='login'?'เข้าสู่ระบบ':'สมัครสมาชิก';}
 }
