@@ -261,7 +261,7 @@ body.is-admin .adm-only-block{display:block}
 <div class="login-wrap" id="loginPage">
   <div class="login-box">
     <div class="login-logo" id="loginLogo">S<span>&amp;</span>T</div>
-    <div class="login-sub" id="loginSub">Welcome — เข้าสู่ระบบ</div>
+    <div class="login-sub" id="loginSub">Product Catalogue — เข้าสู่ระบบ</div>
     <div class="login-tabs">
       <button class="login-tab active" id="tabLogin" onclick="switchTab('login')">เข้าสู่ระบบ</button>
       <button class="login-tab" id="tabReg" onclick="switchTab('register')">สมัครสมาชิก</button>
@@ -515,24 +515,39 @@ async function doSignOut(){await sb.auth.signOut();}
 sb.auth.onAuthStateChange(async(_,session)=>{
   if(session){
     currentUser=session.user;
-    await loadSettings();
-    const adminEmails=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
-    // Only emails in admin_emails list are admin. If list is empty, first-ever user (bootstrapper) can set themselves.
-    isAdmin=adminEmails.includes(currentUser.email.toLowerCase());
-    // Bootstrap: if NO admins set at all and this is the very first login, prompt to claim admin
-    if(!isAdmin && adminEmails.length===0){
-      // Auto-promote first user as admin for initial setup
-      isAdmin=true;
-      const newList=currentUser.email;
-      await sb.from('settings').upsert({key:'admin_emails',value:newList},{onConflict:'key'});
-      settings.admin_emails=newList;
-    }
-    document.body.classList.toggle('is-admin',isAdmin);
-    document.getElementById('topUser').textContent=currentUser.email;
-    document.getElementById('topRole').textContent=isAdmin?'ADMIN':'USER';
+
+    // Show app immediately — don't block on network
     document.getElementById('loginPage').style.display='none';
     document.getElementById('appPage').style.display='flex';
+    document.getElementById('topUser').textContent=currentUser.email;
+    document.getElementById('topRole').textContent='...';
+
+    // Load settings with 5s timeout
+    try {
+      await Promise.race([
+        loadSettings(),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
+      ]);
+    } catch(e){ console.warn('Settings timeout/error:', e.message); }
+
+    // Determine admin status
+    const adminEmails=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+    isAdmin=adminEmails.includes(currentUser.email.toLowerCase());
+
+    // Bootstrap: very first user ever becomes admin
+    if(!isAdmin && adminEmails.length===0){
+      isAdmin=true;
+      try{
+        await sb.from('settings').upsert({key:'admin_emails',value:currentUser.email},{onConflict:'key'});
+        settings.admin_emails=currentUser.email;
+      }catch(e){ console.warn('Bootstrap failed:', e); }
+    }
+
+    document.body.classList.toggle('is-admin',isAdmin);
+    document.getElementById('topRole').textContent=isAdmin?'ADMIN':'VIEWER';
+
     await loadProducts();
+
   } else {
     currentUser=null; isAdmin=false;
     document.body.classList.remove('is-admin');
@@ -543,7 +558,8 @@ sb.auth.onAuthStateChange(async(_,session)=>{
 
 // ── SETTINGS ──
 async function loadSettings(){
-  const {data}=await sb.from('settings').select('*');
+  const {data,error}=await sb.from('settings').select('*');
+  if(error){ console.error('loadSettings error:', error.message); throw error; }
   if(data) data.forEach(r=>{settings[r.key]=r.value;});
   applySettings();
 }
@@ -1021,9 +1037,27 @@ async function removeAdmin(email){
 // Load custom categories on init
 const _origLoadProducts = loadProducts;
 async function loadProducts(){
-  await loadCustomCategories();
-  const {data,error}=await sb.from('products').select('*').order('created_at',{ascending:false});
-  if(error){toast('❌',error.message);return;}
+  try {
+    await Promise.race([
+      loadCustomCategories(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),6000))
+    ]);
+  } catch(e){ console.warn('loadCustomCategories timeout:', e.message); }
+
+  const {data,error}=await Promise.race([
+    sb.from('products').select('*').order('created_at',{ascending:false}),
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error('products timeout')),8000))
+  ]).catch(e=>({data:null,error:{message:e.message}}));
+
+  if(error){ 
+    console.error('loadProducts error:', error.message);
+    document.getElementById('prodArea').innerHTML=`<div class="empty">
+      <div class="empty-icon">⚠️</div>
+      <div class="empty-title">โหลดข้อมูลไม่สำเร็จ</div>
+      <div class="empty-desc">${error.message}<br><br><button class="btn pri" onclick="loadProducts()">ลองใหม่</button></div>
+    </div>`;
+    return;
+  }
   products=data||[];
   render();
 }
