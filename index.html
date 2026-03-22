@@ -476,7 +476,15 @@ body.is-admin .adm-only-block{display:block}
 // ── SUPABASE ──
 const SUPABASE_URL = 'https://ehhvtubfylqifiqhzzim.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVoaHZ0dWJmeWxxaWZpcWh6emltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxNzkxMTQsImV4cCI6MjA4OTc1NTExNH0.ZazJPXohMuawhzBiZpcBryG-rYJX7lmm1ECY419mWbg';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    storageKey: 'st-catalogue-auth',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+    flowType: 'implicit'
+  }
+});
 
 // ── STATE ──
 let products=[], currentCat='all', searchQ='', viewMode='grid';
@@ -1032,16 +1040,27 @@ async function removeAdmin(email){
 }
 
 // Load custom categories on init
-const _origLoadProducts = loadProducts;
 async function loadProducts(){
-  await loadCustomCategories();
-  const {data,error}=await sb.from('products').select('*').order('created_at',{ascending:false});
-  if(error){
-    console.error('loadProducts error:', error.message);
+  // Load categories (non-blocking)
+  try{ await loadCustomCategories(); }catch(e){ console.warn('categories warn:', e); }
+
+  // Retry up to 3x on lock errors
+  let data=null, err=null;
+  for(let i=0; i<3; i++){
+    if(i>0) await new Promise(r=>setTimeout(r,600*i));
+    const res = await sb.from('products').select('*').order('created_at',{ascending:false})
+      .catch(e=>({data:null,error:{message:e.message}}));
+    data=res.data; err=res.error;
+    if(!err || !err.message?.includes('lock')) break;
+    console.warn('Lock conflict, retrying attempt', i+1);
+  }
+
+  if(err){
+    console.error('loadProducts error:', err.message);
     document.getElementById('prodArea').innerHTML=`<div class="empty">
       <div class="empty-icon">⚠️</div>
       <div class="empty-title">โหลดข้อมูลไม่สำเร็จ</div>
-      <div class="empty-desc" style="font-family:var(--mono);font-size:12px">${error.message}<br><br>
+      <div class="empty-desc" style="font-family:var(--mono);font-size:12px">${err.message}<br><br>
         <button class="btn pri" onclick="loadProducts()" style="margin-top:8px">🔄 ลองใหม่</button>
       </div>
     </div>`;
