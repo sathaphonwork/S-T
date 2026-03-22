@@ -229,6 +229,22 @@ select.fc{cursor:pointer}
 body.is-admin .adm-only{display:flex}
 body.is-admin .adm-only-block{display:block}
 .adm-only-block{display:none}
+/* CATEGORY MODAL */
+.cat-manage-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;margin-bottom:12px}
+.cat-manage-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)}
+.cat-manage-name{flex:1;font-size:13px;font-weight:500}
+.cat-manage-cnt{font-size:11px;color:var(--muted);font-family:var(--mono);background:white;border:1px solid var(--border);padding:1px 7px;border-radius:10px}
+.cat-manage-input{flex:1;height:34px;border:1px solid var(--border2);border-radius:var(--r);padding:0 10px;font-family:var(--font);font-size:13px;outline:none}
+.cat-manage-input:focus{border-color:var(--accent)}
+.cat-add-row{display:flex;gap:8px;margin-top:4px}
+/* USER MANAGEMENT */
+.user-list{display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;margin-bottom:8px}
+.user-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)}
+.user-email{flex:1;font-size:13px}
+.user-role-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;letter-spacing:.05em;text-transform:uppercase}
+.user-role-badge.admin{background:#ffeaea;color:var(--accent)}
+.user-role-badge.viewer{background:#e8f5e9;color:#2e7d32}
+
 
 @media(max-width:900px){
   .sidebar{width:180px}
@@ -271,6 +287,8 @@ body.is-admin .adm-only-block{display:block}
     </div>
     <div class="sp"></div>
     <span class="t-user" id="topUser"></span>
+    <button class="tbtn adm" onclick="openCatModal()">🗂 หมวดหมู่</button>
+    <button class="tbtn adm" onclick="openUsersModal()">👥 ผู้ใช้</button>
     <button class="tbtn adm" onclick="openImport()">↑ Import</button>
     <button class="tbtn" onclick="exportCSV()">↓ Export</button>
     <button class="tbtn pri adm" onclick="openAdd()">+ เพิ่มสินค้า</button>
@@ -406,6 +424,36 @@ body.is-admin .adm-only-block{display:block}
   </div>
 </div>
 
+
+<!-- CATEGORY MODAL -->
+<div class="ov" id="catModal">
+  <div class="modal" style="max-width:480px">
+    <div class="mhead"><span class="mtitle">🗂 จัดการหมวดหมู่</span><button class="mcls" onclick="closeOv('catModal')">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">หมวดหมู่ที่มีสินค้าอยู่จะถูกลบได้ก็ต่อเมื่อโอนสินค้าออกก่อน</div>
+      <div class="cat-manage-list" id="catManageList"></div>
+      <div class="cat-add-row">
+        <input type="text" class="cat-manage-input" id="newCatInput" placeholder="ชื่อหมวดหมู่ใหม่..." onkeydown="if(event.key==='Enter')addCategory()">
+        <button class="btn pri" onclick="addCategory()">+ เพิ่ม</button>
+      </div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeOv('catModal')">ปิด</button></div>
+  </div>
+</div>
+
+<!-- USERS MODAL -->
+<div class="ov" id="usersModal">
+  <div class="modal" style="max-width:500px">
+    <div class="mhead"><span class="mtitle">👥 จัดการผู้ใช้</span><button class="mcls" onclick="closeOv('usersModal')">✕</button></div>
+    <div class="mbody">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">ผู้สมัครใหม่จะได้สิทธิ์ <strong>Viewer</strong> โดยอัตโนมัติ Admin ต้องอัปเกรดสิทธิ์ให้</div>
+      <div class="user-list" id="userList"><div class="loader"><div class="spin"></div></div></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">* อีเมล Admin หลักตั้งค่าได้ที่ ⚙️ ตั้งค่า → อีเมล Admin</div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeOv('usersModal')">ปิด</button></div>
+  </div>
+</div>
+
 <!-- CONFIRM MODAL -->
 <div class="ov" id="confirmModal">
   <div class="cbox">
@@ -469,8 +517,16 @@ sb.auth.onAuthStateChange(async(_,session)=>{
     currentUser=session.user;
     await loadSettings();
     const adminEmails=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
-    // If no admins set yet, the first user is admin by default
-    isAdmin=adminEmails.length===0||adminEmails.includes(currentUser.email.toLowerCase());
+    // Only emails in admin_emails list are admin. If list is empty, first-ever user (bootstrapper) can set themselves.
+    isAdmin=adminEmails.includes(currentUser.email.toLowerCase());
+    // Bootstrap: if NO admins set at all and this is the very first login, prompt to claim admin
+    if(!isAdmin && adminEmails.length===0){
+      // Auto-promote first user as admin for initial setup
+      isAdmin=true;
+      const newList=currentUser.email;
+      await sb.from('settings').upsert({key:'admin_emails',value:newList},{onConflict:'key'});
+      settings.admin_emails=newList;
+    }
     document.body.classList.toggle('is-admin',isAdmin);
     document.getElementById('topUser').textContent=currentUser.email;
     document.getElementById('topRole').textContent=isAdmin?'ADMIN':'USER';
@@ -806,6 +862,171 @@ function openOv(id){document.getElementById(id).classList.add('open');}
 function closeOv(id){document.getElementById(id).classList.remove('open');}
 let ttimer;
 function toast(icon,msg){document.getElementById('tIcon').textContent=icon;document.getElementById('tMsg').textContent=msg;const t=document.getElementById('toast');t.classList.add('show');clearTimeout(ttimer);ttimer=setTimeout(()=>t.classList.remove('show'),2800);}
+
+
+// ── CATEGORIES MANAGEMENT ──
+let customCategories = [];
+
+async function loadCustomCategories(){
+  const {data} = await sb.from('settings').select('value').eq('key','custom_categories').single();
+  if(data && data.value){
+    try{ customCategories = JSON.parse(data.value); }catch(e){ customCategories=[]; }
+  }
+}
+
+async function saveCustomCategories(){
+  await sb.from('settings').upsert({key:'custom_categories',value:JSON.stringify(customCategories)},{onConflict:'key'});
+}
+
+async function openCatModal(){
+  await loadCustomCategories();
+  renderCatManageList();
+  openOv('catModal');
+}
+
+function renderCatManageList(){
+  // Merge: cats from products + custom cats (deduplicated)
+  const fromProducts = [...new Set(products.map(p=>p.category))];
+  const allCats = [...new Set([...fromProducts, ...customCategories])].sort();
+  const el = document.getElementById('catManageList');
+  if(!allCats.length){
+    el.innerHTML = '<div style="font-size:13px;color:var(--muted);padding:10px 0">ยังไม่มีหมวดหมู่</div>';
+    return;
+  }
+  el.innerHTML = allCats.map(cat => {
+    const cnt = products.filter(p=>p.category===cat).length;
+    const canDel = cnt===0;
+    return `<div class="cat-manage-row">
+      <span class="cat-manage-name">${cat}</span>
+      <span class="cat-manage-cnt">${cnt} สินค้า</span>
+      ${canDel ? `<button class="ibtn del" onclick="deleteCat(${JSON.stringify(cat)})" title="ลบ">🗑</button>` : `<span style="font-size:11px;color:var(--muted)">ลบไม่ได้</span>`}
+    </div>`;
+  }).join('');
+}
+
+async function addCategory(){
+  const input = document.getElementById('newCatInput');
+  const name = input.value.trim();
+  if(!name){ toast('⚠️','กรุณากรอกชื่อหมวดหมู่'); return; }
+  const allCats = [...new Set([...products.map(p=>p.category), ...customCategories])];
+  if(allCats.includes(name)){ toast('⚠️','มีหมวดหมู่นี้อยู่แล้ว'); return; }
+  customCategories.push(name);
+  await saveCustomCategories();
+  input.value='';
+  renderCatManageList();
+  render();
+  toast('✓',`เพิ่มหมวดหมู่ "${name}" แล้ว`);
+}
+
+async function deleteCat(cat){
+  const cnt = products.filter(p=>p.category===cat).length;
+  if(cnt>0){ toast('⚠️',`ยังมีสินค้า ${cnt} ชิ้น ในหมวดนี้`); return; }
+  customCategories = customCategories.filter(c=>c!==cat);
+  await saveCustomCategories();
+  renderCatManageList();
+  render();
+  toast('🗑',`ลบหมวดหมู่ "${cat}" แล้ว`);
+}
+
+// Override render to include customCategories
+const _origRenderSidebar = renderSidebar;
+function renderSidebar(){
+  const fromProducts = [...new Set(products.map(p=>p.category))];
+  const allCats = [...new Set([...fromProducts, ...customCategories])].sort();
+  let h=`<div class="s-lbl">Categories</div>
+    <div class="cat-item ${currentCat==='all'?'active':''}" onclick="setCat('all')">
+      <span class="cn">ทั้งหมด</span><span class="cc">${products.length}</span>
+    </div>`;
+  allCats.forEach(cat=>{
+    const n=products.filter(p=>p.category===cat).length;
+    h+=`<div class="cat-item ${currentCat===cat?'active':''}" onclick="setCat(${JSON.stringify(cat)})">
+      <span class="cn">${cat}</span><span class="cc">${n}</span>
+    </div>`;
+  });
+  if(isAdmin){
+    h+=`<div style="padding:12px 14px 6px;border-top:1px solid #2a2a2a;margin-top:8px">
+      <div onclick="openCatModal()" style="display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:5px;cursor:pointer;color:#666;font-size:12px;transition:all .15s" onmouseenter="this.style.background='#2a2a2a';this.style.color='#aaa'" onmouseleave="this.style.background='';this.style.color='#666'">
+        🗂 <span>จัดการหมวดหมู่</span>
+      </div>
+    </div>`;
+  }
+  document.getElementById('sidebar').innerHTML=h;
+}
+
+// Update updateCatSel to include customCategories
+function updateCatSel(){
+  const s=document.getElementById('fCat'),v=s.value;
+  const fromProducts=[...new Set(products.map(p=>p.category))];
+  const allCats=[...new Set([...fromProducts,...customCategories])].sort();
+  s.innerHTML='<option value="">-- เลือกหมวดหมู่ --</option>'+allCats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  s.value=v;
+}
+
+// ── USERS MANAGEMENT ──
+async function openUsersModal(){
+  openOv('usersModal');
+  renderUserList();
+}
+
+async function renderUserList(){
+  const el=document.getElementById('userList');
+  el.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  // Get admin list from settings
+  const adminEmails=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  // We can't list all auth users from client (security), so show admin management UI
+  el.innerHTML=`<div style="font-size:13px;margin-bottom:12px;line-height:1.7;color:var(--text)">
+    <strong>Admin ปัจจุบัน:</strong><br>
+    ${adminEmails.length ? adminEmails.map(e=>`<div class="user-row" style="margin-top:6px">
+      <span class="user-email">${e}</span>
+      <span class="user-role-badge admin">ADMIN</span>
+      <button class="ibtn del" onclick="removeAdmin('${e}')" title="ถอดสิทธิ์">✕</button>
+    </div>`).join('') : '<div style="color:var(--muted);font-size:13px;padding:8px 0">ไม่มี Admin</div>'}
+  </div>
+  <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+    <div class="flbl" style="margin-bottom:6px">เพิ่ม Admin ใหม่</div>
+    <div style="display:flex;gap:8px">
+      <input type="text" class="fc" id="newAdminEmail" placeholder="email@example.com" style="flex:1;height:36px">
+      <button class="btn pri" onclick="addAdmin()">+ เพิ่ม</button>
+    </div>
+  </div>
+  <div style="margin-top:14px;padding:10px 12px;background:#fff8e1;border:1px solid #ffe082;border-radius:var(--r);font-size:12px;color:#795548;line-height:1.6">
+    ℹ️ ผู้สมัครใหม่จะได้สิทธิ์ <strong>Viewer</strong> โดยอัตโนมัติ<br>
+    ต้องเพิ่มอีเมลที่นี่เพื่อให้เป็น Admin
+  </div>`;
+}
+
+async function addAdmin(){
+  const email=document.getElementById('newAdminEmail').value.trim().toLowerCase();
+  if(!email||!email.includes('@')){ toast('⚠️','กรุณากรอกอีเมลที่ถูกต้อง'); return; }
+  const cur=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  if(cur.includes(email)){ toast('⚠️','อีเมลนี้เป็น Admin อยู่แล้ว'); return; }
+  cur.push(email);
+  const newVal=cur.join(', ');
+  await sb.from('settings').upsert({key:'admin_emails',value:newVal},{onConflict:'key'});
+  settings.admin_emails=newVal;
+  toast('✓',`เพิ่ม Admin "${email}" แล้ว`);
+  renderUserList();
+}
+
+async function removeAdmin(email){
+  if(email===currentUser.email){ toast('⚠️','ไม่สามารถถอดสิทธิ์ตัวเองได้'); return; }
+  const cur=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const newList=cur.filter(e=>e!==email).join(', ');
+  await sb.from('settings').upsert({key:'admin_emails',value:newList},{onConflict:'key'});
+  settings.admin_emails=newList;
+  toast('🗑',`ถอดสิทธิ์ "${email}" แล้ว`);
+  renderUserList();
+}
+
+// Load custom categories on init
+const _origLoadProducts = loadProducts;
+async function loadProducts(){
+  await loadCustomCategories();
+  const {data,error}=await sb.from('products').select('*').order('created_at',{ascending:false});
+  if(error){toast('❌',error.message);return;}
+  products=data||[];
+  render();
+}
 
 document.querySelectorAll('.ov').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)el.classList.remove('open');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.ov.open').forEach(el=>el.classList.remove('open'));closeDetail();}});
