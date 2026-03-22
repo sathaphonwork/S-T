@@ -522,13 +522,8 @@ sb.auth.onAuthStateChange(async(_,session)=>{
     document.getElementById('topUser').textContent=currentUser.email;
     document.getElementById('topRole').textContent='...';
 
-    // Load settings with 5s timeout
-    try {
-      await Promise.race([
-        loadSettings(),
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
-      ]);
-    } catch(e){ console.warn('Settings timeout/error:', e.message); }
+    // Load settings (safe, non-blocking)
+    try { await loadSettings(); } catch(e){ console.warn('Settings error:', e.message); applySettings(); }
 
     // Determine admin status
     const adminEmails=(settings.admin_emails||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
@@ -559,7 +554,7 @@ sb.auth.onAuthStateChange(async(_,session)=>{
 // ── SETTINGS ──
 async function loadSettings(){
   const {data,error}=await sb.from('settings').select('*');
-  if(error){ console.error('loadSettings error:', error.message); throw error; }
+  if(error){ console.error('loadSettings error:', error.message); applySettings(); return; }
   if(data) data.forEach(r=>{settings[r.key]=r.value;});
   applySettings();
 }
@@ -884,10 +879,12 @@ function toast(icon,msg){document.getElementById('tIcon').textContent=icon;docum
 let customCategories = [];
 
 async function loadCustomCategories(){
-  const {data} = await sb.from('settings').select('value').eq('key','custom_categories').single();
-  if(data && data.value){
-    try{ customCategories = JSON.parse(data.value); }catch(e){ customCategories=[]; }
-  }
+  try {
+    const {data,error} = await sb.from('settings').select('value').eq('key','custom_categories').maybeSingle();
+    if(!error && data && data.value){
+      try{ customCategories = JSON.parse(data.value); }catch(e){ customCategories=[]; }
+    }
+  } catch(e){ console.warn('loadCustomCategories error:',e); }
 }
 
 async function saveCustomCategories(){
@@ -1037,24 +1034,16 @@ async function removeAdmin(email){
 // Load custom categories on init
 const _origLoadProducts = loadProducts;
 async function loadProducts(){
-  try {
-    await Promise.race([
-      loadCustomCategories(),
-      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),6000))
-    ]);
-  } catch(e){ console.warn('loadCustomCategories timeout:', e.message); }
-
-  const {data,error}=await Promise.race([
-    sb.from('products').select('*').order('created_at',{ascending:false}),
-    new Promise((_,rej)=>setTimeout(()=>rej(new Error('products timeout')),8000))
-  ]).catch(e=>({data:null,error:{message:e.message}}));
-
-  if(error){ 
+  await loadCustomCategories();
+  const {data,error}=await sb.from('products').select('*').order('created_at',{ascending:false});
+  if(error){
     console.error('loadProducts error:', error.message);
     document.getElementById('prodArea').innerHTML=`<div class="empty">
       <div class="empty-icon">⚠️</div>
       <div class="empty-title">โหลดข้อมูลไม่สำเร็จ</div>
-      <div class="empty-desc">${error.message}<br><br><button class="btn pri" onclick="loadProducts()">ลองใหม่</button></div>
+      <div class="empty-desc" style="font-family:var(--mono);font-size:12px">${error.message}<br><br>
+        <button class="btn pri" onclick="loadProducts()" style="margin-top:8px">🔄 ลองใหม่</button>
+      </div>
     </div>`;
     return;
   }
