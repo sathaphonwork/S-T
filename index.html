@@ -431,6 +431,11 @@ async function init(){
   const{data:{session}}=await sb.auth.getSession();
   if(!session){showLoading(false);document.getElementById('auth-screen').style.display='flex';return;}
   currentUser=session.user;
+  await startApp();
+}
+
+async function startApp(){
+  showLoading(true);
   await loadProfile();await loadCats();await loadProducts();applyRoleUI();
   document.getElementById('logo-input').value=localStorage.getItem(LS_NAME)||'S&T';
   document.title=document.getElementById('logo-input').value;
